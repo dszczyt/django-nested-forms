@@ -19,52 +19,54 @@ First of all, insert the nested_forms folder in in project's path.
 In your forms.py
 ----------------
 
-from nested_forms import ComplexModelForm
+::
+  from nested_forms import ComplexModelForm
 
 Make you main form inherit from ComplexModelForm
 
 In Meta subclass of your ComplexModelForm, add :
 
-formsets = {
-}
+::
+  formsets = {
+  }
 
 This dict has for keys the related objects' names.
 
 For the examples form Django's tutorial, we could write :
 
+::
+  def get_choice_form(poll):
+      class ChoiceForm(forms.ModelForm):
+          class Meta:
+              model = Choice
+              exclude = ['poll']
 
-def get_choice_form(poll):
-    class ChoiceForm(forms.ModelForm):
-        class Meta:
-            model = Choice
-            exclude = ['poll']
+          def save(self, commit=True):
+              instance = super(ChoiceForm, self).save(commit=False)
+              instance.poll = poll
+              if commit:
+                  instance.save()
+                  self.save_m2m()
+              return instance
 
-        def save(self, commit=True):
-            instance = super(ChoiceForm, self).save(commit=False)
-            instance.poll = poll
-            if commit:
-                instance.save()
-                self.save_m2m()
-            return instance
+      return ChoiceForm
 
-    return ChoiceForm
+  class PollForm(ComplexModelForm):
+      class Meta:
+          model = Poll
+          formsets = {
+              'choice_set': {
+                   'form': lambda instance: get_choice_form(instance),
+                   'extra': 1,
+                   'initial': [
+                       {
+                           'choice': 'A sample choice',
+                           'votes': 0,
+                       }
+                   ],
+              },
+          }
 
-
-class PollForm(ComplexModelForm):
-    class Meta:
-        model = Poll
-        formsets = {
-            'choice_set': {
-                 'form': lambda instance: get_choice_form(instance),
-                 'extra': 1,
-                 'initial': [
-                     {
-                         'choice': 'A sample choice',
-                         'votes': 0,
-                     }
-                 ],
-            },
-        }
 
 You now have a nested form. Let's start using it in your template.
 
