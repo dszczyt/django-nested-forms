@@ -20,6 +20,7 @@ In your forms.py
 ----------------
 
 ::
+
   from nested_forms import ComplexModelForm
 
 Make you main form inherit from ComplexModelForm
@@ -27,6 +28,7 @@ Make you main form inherit from ComplexModelForm
 In Meta subclass of your ComplexModelForm, add :
 
 ::
+
   formsets = {
   }
 
@@ -35,6 +37,7 @@ This dict has for keys the related objects' names.
 For the examples form Django's tutorial, we could write :
 
 ::
+
   def get_choice_form(poll):
       class ChoiceForm(forms.ModelForm):
           class Meta:
