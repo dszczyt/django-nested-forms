@@ -23,13 +23,13 @@ class ComplexBaseInlineFormSet(BaseInlineFormSet):
 
         return obj
 
-    def add_fields(self, form, index):
-        super(BaseInlineFormSet, self).add_fields(form, index)
-
     def save(self, commit=True):
         """Saves model instances for every form, adding and changing instances
         as necessary, and returns the list of instances.
         """
+        if not self.is_valid():
+            return
+
         if not commit:
             self.saved_forms = []
             def save_m2m():
@@ -124,11 +124,18 @@ class ComplexModelForm(forms.ModelForm):
         self.init_formsets()
 
         changed_data = self.changed_data or []
-        for formset in self.formsets.values():
-            for form in formset.forms:
-                if form.has_changed():
-                    changed_data.append(formset)
-                    break
+        if changed_data:
+            for formset in self.formsets.values():
+                if formset is not None:
+                    if len(formset.forms) > 0:
+                            changed_data.append(formset)
+        else:
+            for formset in self.formsets.values():
+                if formset is not None:
+                    for form in formset.forms:
+                        if form.has_changed():
+                            changed_data.append(formset)
+                            break
         self._changed_data = changed_data
 
     def init_formsets(self):
@@ -149,7 +156,8 @@ class ComplexModelForm(forms.ModelForm):
     def clean(self):
         cleaned_data = super(ComplexModelForm, self).clean()
         for formset_name, formset in getattr(self, 'formsets', {}).items():
-            formset.clean()
+            if formset:
+                formset.clean()
         return cleaned_data
 
     def get_formset_prefix(self, name):
@@ -168,12 +176,12 @@ class ComplexModelForm(forms.ModelForm):
         elif isinstance(field, models.ManyToManyField):
             return field.rel.to
 
-    def _get_formset(self, name, form, extra=0, initial=None, can_delete=True, force_change=True, \
-                     force_initial=False, update_button=None, fk_name=None, duplicate=False, \
-                     exclude_from_duplication=None, queryset=None, force_extra=False):
+    def _get_formset(self, name, form, extra=None, initial=None, can_delete=True, \
+                     update_button=None, fk_name=None, duplicate=False, \
+                     exclude_from_duplication=None, queryset=None, allowed_objects=None, \
+                     *args, **kwargs):
 
         def shift_keys(data, prefix, idx):
-            #print "shift_keys", prefix, idx
             if not data:
                 return
             start = re.compile(r"^%s\-(?P<form_idx>\d+)\-(?P<suffix>.*)$" % prefix)
@@ -205,7 +213,7 @@ class ComplexModelForm(forms.ModelForm):
                 return var or default
 
         data = self.data.keys() and self.data.copy() or None
-        files = self.files or None
+        files = self.files.keys() and self.files.copy() or None
 
         self.full_clean()
 
@@ -224,67 +232,46 @@ class ComplexModelForm(forms.ModelForm):
         update_button = resolve_callable(update_button, args=[self.prefix])
 
         update = False
+        if data and prefix:
+            #print "===================="
+            for key in data.keys():
+                if not key.startswith(prefix):
+                    #print "(N)", prefix, key
+                    del data[key]
+                #else:
+                    #print "(Y)", prefix, key, data.getlist(key)
+            if not data.keys():
+                #print "NO DATA"
+                data = None
+
+            if files is not None:
+                for key in files.keys():
+                    if not key.startswith(prefix):
+                        del files[key]
+                if not files:
+                    files = None
+
         if data:
             # Nettoyage
-            if to:
-                i = 0
-                for j in range(int(data.get("%s-%s" % (prefix, TOTAL_FORM_COUNT), 0))):
-                    pk_key = "%s-%d-id" % (prefix, j)
-                    pk = data.get(pk_key, 0)
-                    if not pk:
-                        continue
-
-                    try:
-                        to.objects.get(pk = pk)
-                    except to.DoesNotExist:
-                        shift_keys(data, prefix, i)
-                        shift_keys(files, prefix, i)
-                        data["%s-%s" % (prefix, TOTAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, TOTAL_FORM_COUNT)]) - 1
-                        data["%s-%s" % (prefix, INITIAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, INITIAL_FORM_COUNT)]) - 1
-
-            # Demande d'actualisation des données à partir des données initiales
-            if update_button and data.has_key(update_button):
-                initial = resolve_callable(initial, args=[instance], default=[])
-                for i, pair in enumerate(initial):
-                    prefix_ = "%s-%d-" % (prefix, i)
-
-                    map(data.__delitem__, filter(lambda k: k.startswith(prefix_), data.keys()))
-
-                    for key, value in pair.items():
-                        name_ = "%s%s" % (prefix_, key)
-                        data[name_] = unicode(value)
-                        #print "ADD", name_, value
-                if instance.pk:
-                    queryset = getattr(instance, name).all()
-                    queryset.delete()
-                data.update({ "%s-%s" % (self.add_prefix(name), INITIAL_FORM_COUNT): 0 })
-                data.update({ "%s-%s" % (self.add_prefix(name), TOTAL_FORM_COUNT): len(initial) })
-
-            # Demande de suppression à la volée
-            if prefix not in self.safe_delete:
-                for i in range(int(data.get("%s-%s" % (prefix, TOTAL_FORM_COUNT), 0)))[::-1]:
-                    base_key = "%s-%d-" % (prefix, i)
-
-                    if data.get("%s%s" % (base_key, DELETION_FIELD_NAME), None):
-                        #print "DELETE", "%s%s" % (base_key, DELETION_FIELD_NAME), i
-                        objects_deleted = False
-                        if to:
-                            objects = to.objects.filter(pk = data.get("%sid" % base_key) or 0)
-                            if objects.count() > 0:
-                                objects_deleted = True
-                                #print "DELETE PKs", objects.values_list('pk', flat=True)
-                                for o in objects:
-                                    o.delete()
-                        shift_keys(data, prefix, i)
-                        shift_keys(files, prefix, i)
-                        data["%s-%s" % (prefix, TOTAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, TOTAL_FORM_COUNT)]) - 1
-                        if objects_deleted:
-                            data["%s-%s" % (prefix, INITIAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, INITIAL_FORM_COUNT)]) - 1
+            #i = 0
+            #for j in range(int(data.get("%s-%s" % (self.add_prefix(name), INITIAL_FORM_COUNT), 0))):
+            #    if not data.has_key("%s-%d-id" % (self.add_prefix(name), i)):
+            #        shift_keys(data, prefix, i)
+            #        shift_keys(files, prefix, i)
 
             # Demande de duplication du dernier formulaire
-            if isinstance(data, QueryDict) and duplicate:
+            if isinstance(data, QueryDict):
                 nb_forms = map(int, data.getlist("%s-%s" % (prefix, TOTAL_FORM_COUNT)))
-                if len(nb_forms) > 1:
+            else:
+                nb_forms = [ int(data["%s-%s" % (prefix, TOTAL_FORM_COUNT)]) ]
+            #print "NB FORMS", prefix, nb_forms
+            if len(nb_forms) > 1:
+                #print "Y'N'A PLEIN"
+                data["%s-%s" % (prefix, TOTAL_FORM_COUNT)] = max(nb_forms)
+                #initial_key = "%s-%s" % (prefix, INITIAL_FORM_COUNT)
+                #data[initial_key] = int(data.get(initial_key, 0)) + 1
+
+                if duplicate:
                     last_index = max(nb_forms) - 1
 
                     start = "%s-%d-" % (prefix, last_index - 1)
@@ -310,14 +297,69 @@ class ComplexModelForm(forms.ModelForm):
                             }
                             data.update(new_line)
 
+            if to:
+                i = 0
+                for j in range(int(data.get("%s-%s" % (prefix, TOTAL_FORM_COUNT), 0))):
+                    pk_key = "%s-%d-id" % (prefix, i)
+
+                    if i >= int(data["%s-%s" % (prefix, INITIAL_FORM_COUNT)]):
+                        i += 1
+                        continue
+
+                    pk = data.get(pk_key, 0)
+                    try:
+                        to.objects.get(pk = pk)
+                    except to.DoesNotExist:
+                        shift_keys(data, prefix, i)
+                        shift_keys(files, prefix, i)
+                        data["%s-%s" % (prefix, TOTAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, TOTAL_FORM_COUNT)]) - 1
+                        data["%s-%s" % (prefix, INITIAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, INITIAL_FORM_COUNT)]) - 1
+                    else:
+                        i += 1
+
+            # Demande d'actualisation des données à partir des données initiales
+            if update_button and data.has_key(update_button):
+                initial = resolve_callable(initial, args=[instance], default=[])
+                for i, pair in enumerate(initial):
+                    prefix_ = "%s-%d-" % (prefix, i)
+
+                    map(data.__delitem__, filter(lambda k: k.startswith(prefix_), data.keys()))
+
+                    for key, value in pair.items():
+                        name_ = "%s%s" % (prefix_, key)
+                        data[name_] = unicode(value)
+                if instance.pk:
+                    getattr(instance, name).all().delete()
+                data.update({ "%s-%s" % (self.add_prefix(name), INITIAL_FORM_COUNT): 0 })
+                data.update({ "%s-%s" % (self.add_prefix(name), TOTAL_FORM_COUNT): len(initial) })
+
+            # Demande de suppression à la volée
+            if prefix not in self.safe_delete:
+                for i in range(int(data.get("%s-%s" % (prefix, TOTAL_FORM_COUNT), 0)))[::-1]:
+                    base_key = "%s-%d-" % (prefix, i)
+
+                    if "%s%s" % (base_key, DELETION_FIELD_NAME) in data.keys():
+                        #print "DELETE", "%s%s" % (base_key, DELETION_FIELD_NAME), i
+                        objects_deleted = False
+                        if to:
+                            objects = to.objects.filter(pk = data.get("%sid" % base_key) or 0)
+                            if objects.exists():
+                                objects_deleted = True
+                                #print "DELETE PKs", objects.values_list('pk', flat=True)
+                                for o in objects:
+                                    o.delete()
+                        shift_keys(data, prefix, i)
+                        shift_keys(files, prefix, i)
+                        data["%s-%s" % (prefix, TOTAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, TOTAL_FORM_COUNT)]) - 1
+                        if objects_deleted:
+                            data["%s-%s" % (prefix, INITIAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, INITIAL_FORM_COUNT)]) - 1
+
             if "%s-%s" % (prefix, TOTAL_FORM_COUNT) not in data.keys():
                 data = files = None
 
             initial = None
-        else:
+        elif not self.instance.pk:
             initial = resolve_callable(initial, args=[instance], default=[])
-            if not extra:
-                extra = len(initial)
 
         formset = None
 
@@ -331,7 +373,7 @@ class ComplexModelForm(forms.ModelForm):
                     to,
                     form,
                     ComplexBaseInlineFormSet,
-                    extra = force_extra and extra or 0,
+                    extra = extra,
                     formfield_callback = lambda f, **kwargs: f.formfield(**kwargs),
                     fk_name = fk_name,
                 )
@@ -346,12 +388,26 @@ class ComplexModelForm(forms.ModelForm):
                 if not queryset or not isinstance(queryset, QuerySet):
                     queryset = getattr(self.instance, "_%s" % name, None)
                     if not queryset or not isinstance(queryset, QuerySet):
-                        queryset = getattr(self.instance, name).all()
+                        _data = data or {}
+                        queryset = to.objects.filter(
+                                pk__in = list(to.objects.filter(
+                                    **{
+                                        field.rel.related_name: self.instance.pk
+                                    }
+                                ).values_list("pk", flat=True)) + [
+                                    _data.get('%s-%d-id' % (prefix, x))
+                                    for x in range(int(_data.get("%s-%s" % (prefix, INITIAL_FORM_COUNT), 0)))
+                                ]
+                        ).distinct()
+                if allowed_objects:
+                    queryset = allowed_objects.filter(
+                        pk__in = queryset.values_list('pk', flat=True)
+                    ).distinct()
 
                 formset_class = modelformset_factory(
                     to,
                     form,
-                    extra = force_extra and extra or 0,
+                    extra = extra,
                     can_delete=can_delete,
                     formfield_callback = lambda f, **kwargs: f.formfield(**kwargs),
                 )
@@ -363,6 +419,17 @@ class ComplexModelForm(forms.ModelForm):
                     queryset = queryset,
                 )
         else:
+            if data:
+                _data = data or {}
+                queryset = to.objects.filter(
+                    pk__in = [
+                        _data.get('%s-%d-id' % (prefix, x))
+                        for x in range(int(_data.get("%s-%s" % (prefix, INITIAL_FORM_COUNT), 0)))
+                    ]
+                ).distinct()
+            else:
+                queryset = to.objects.none()
+
             formset_class = modelformset_factory(
                 to,
                 form,
@@ -374,7 +441,7 @@ class ComplexModelForm(forms.ModelForm):
                 data,
                 files,
                 prefix = prefix,
-                queryset = to.objects.none(),
+                queryset = queryset,
                 initial = not self.instance.pk and isinstance(initial, list) and initial or None,
             )
 
@@ -388,16 +455,16 @@ class ComplexModelForm(forms.ModelForm):
         except:
             deleted_instance_pks = []
 
-        setattr(instance, "_%s" % name, [])
+        tmp_objs = []
 
         for form in formset.forms:
             try:
                 if form.instance.pk not in deleted_instance_pks:
-                    l = getattr(instance, "_%s" % name)
-                    l.append(form.instance)
-                    setattr(instance, "_%s" % name, l)
+                    tmp_objs.append(form.instance)
             except Exception, e:
                 pass
+
+        setattr(instance, "_%s" % name, tmp_objs)
 
         return formset
 
@@ -409,16 +476,30 @@ class ComplexModelForm(forms.ModelForm):
                     len(self.data.getlist(formset.add_prefix(TOTAL_FORM_COUNT))) > 1
                 ):
                     return False
-        ret = super(ComplexModelForm, self).is_valid()
-        return ret
+        return super(ComplexModelForm, self).is_valid()
 
     def save(self, commit=True):
+        if not self.is_valid():
+            return
         instance = super(ComplexModelForm, self).save(commit=False)
         if commit: # and self.is_valid():
             instance.save()
             self.save_m2m()
-            for formset in self.formsets.values():
+            for formset_name, formset in self.formsets.items():
                 instances = formset.save()
+
+                objects = [
+                    form.instance
+                    for form in formset.forms
+                    if form.instance.pk
+                ]
+                print u"instances à attacher", objects
+                getattr(
+                    instance,
+                    formset_name
+                ).add(*objects)
+
+
 
             self.formsets = {}
             self.data = {}
