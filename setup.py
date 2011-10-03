@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='django-nested-forms',
-    version="0.1",
+    version="0.1.1",
     author='Damien Szczyt',
     url='https://github.com/dszczyt/django-nested-forms',
     packages=find_packages(),
