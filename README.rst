@@ -4,7 +4,11 @@ Django Nested Forms
 Description
 ===========
 
-I use Django for every web project I have to do. For most projects, to help users for input their data, I had to create formsets manually, inside forms, and it was really confusing to implement it. I searched for projects that could help me creating these kind of forms, and found nothing that could really help me. So I created this small python/django class.
+I use Django for all my web projects.
+
+I like to simplify my applications'forms by nesting them, for example when users can add many photos on a product.
+
+This class will help you to easily create nested forms in your project. I created this for a big project, with many nested forms, and many users love it every days.
 
 Requirements
 ============
@@ -77,6 +81,27 @@ In your templates
 -----------------
 
 Considering your nested form instance in a form variable in your context, you can access your access your form fields like any other forms. Your formsets are accessible by {{ form.formsets.[ name of related name of your object] }}. Don't forget to add the management form for each, and each formset is like any formset you would create manually.
+*DON'T FORGET TO IMPLEMENT THE "ADD" TEMPLATE FILTER !*
 
+::
+    <form method="post">
+        <fieldset>
+            <legend>Poll</legend>
+            {{ form.as_div }}
 
-/To be completed.../
+            {% with form.formsets.choice_set as choice_formset %}
+                {{ choice_formset.management_form }}
+                {% for choice_form in choice_formset.forms %}
+                <fieldset>
+                <legend>Choice {{ forloop.counter }}</legend>
+                {{ choice_form.as_div }}
+                </fieldset>
+                {% endfor %}
+                <button name="{{ choice_formset.prefix }}-TOTAL_FORMS" value="contact_formset.total_form_count|add:1">
+                    Add a choice
+                </button>
+            {% endwith %}
+        </fieldset>
+        <input type="submit" value="Save poll"/>
+    </form>
+
