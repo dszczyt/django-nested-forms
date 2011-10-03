@@ -84,6 +84,7 @@ Considering your nested form instance in a form variable in your context, you ca
 *DON'T FORGET TO IMPLEMENT THE "ADD" TEMPLATE FILTER !*
 
 ::
+
   <form method="post">
       <fieldset>
           <legend>Poll</legend>
