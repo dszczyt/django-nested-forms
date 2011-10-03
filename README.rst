@@ -84,24 +84,24 @@ Considering your nested form instance in a form variable in your context, you ca
 *DON'T FORGET TO IMPLEMENT THE "ADD" TEMPLATE FILTER !*
 
 ::
-    <form method="post">
-        <fieldset>
-            <legend>Poll</legend>
-            {{ form.as_div }}
+  <form method="post">
+      <fieldset>
+          <legend>Poll</legend>
+          {{ form.as_div }}
 
-            {% with form.formsets.choice_set as choice_formset %}
-                {{ choice_formset.management_form }}
-                {% for choice_form in choice_formset.forms %}
-                <fieldset>
-                <legend>Choice {{ forloop.counter }}</legend>
-                {{ choice_form.as_div }}
-                </fieldset>
-                {% endfor %}
-                <button name="{{ choice_formset.prefix }}-TOTAL_FORMS" value="contact_formset.total_form_count|add:1">
-                    Add a choice
-                </button>
-            {% endwith %}
-        </fieldset>
-        <input type="submit" value="Save poll"/>
-    </form>
+          {% with form.formsets.choice_set as choice_formset %}
+              {{ choice_formset.management_form }}
+              {% for choice_form in choice_formset.forms %}
+              <fieldset>
+              <legend>Choice {{ forloop.counter }}</legend>
+              {{ choice_form.as_div }}
+              </fieldset>
+              {% endfor %}
+              <button name="{{ choice_formset.prefix }}-TOTAL_FORMS" value="contact_formset.total_form_count|add:1">
+                  Add a choice
+              </button>
+          {% endwith %}
+      </fieldset>
+      <input type="submit" value="Save poll"/>
+  </form>
 
