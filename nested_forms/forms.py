@@ -189,7 +189,7 @@ class ComplexModelForm(forms.ModelForm):
             return name
 
     def get_related_field(self, name):
-        return self._meta.model._meta.get_field_by_name(name)[0]
+        return self._meta.model.__dict__[name].related
 
     def get_related_model(self, name):
         field = self.get_related_field(name)
