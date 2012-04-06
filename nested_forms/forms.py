@@ -3,9 +3,11 @@ import re
 import logging
 
 from django import forms
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.query import QuerySet
 from django.db.models.related import RelatedObject
+from django.forms.fields import FileField
 from django.forms.formsets import TOTAL_FORM_COUNT, INITIAL_FORM_COUNT, DELETION_FIELD_NAME
 from django.forms.models import ModelFormOptions, ModelFormMetaclass, modelformset_factory, \
         inlineformset_factory, BaseInlineFormSet
@@ -120,7 +122,7 @@ class ComplexModelForm(forms.ModelForm):
         Just prints all errors on all forms, recursively
         """
         logger.debug("CF %s %s %s %s %s" % (self.prefix, self.errors, self.non_field_errors(), self.is_bound, self.is_valid()))
-        for name, formset in self.formsets.items():
+        for formset in self.formsets.values():
             logger.debug("FS %s %s %s %s" % (formset.prefix, formset.errors, formset.non_form_errors(), self.is_valid()))
             for form in formset.forms:
                 if hasattr(form, "show_errors"):
@@ -130,10 +132,10 @@ class ComplexModelForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         self.safe_delete = kwargs.pop("safe_delete", [])
+        parent_instance_name, parent_instance = kwargs.pop('parent_instance', (None, None))
 
         super(ComplexModelForm, self).__init__(*args, **kwargs)
 
-        parent_instance_name, parent_instance = kwargs.pop('parent_instance', (None, None))
         if parent_instance_name and parent_instance:
             setattr(self.instance, parent_instance_name, parent_instance)
 
@@ -147,7 +149,7 @@ class ComplexModelForm(forms.ModelForm):
             for formset in self.formsets.values():
                 if formset is not None:
                     if len(formset.forms) > 0:
-                            changed_data.append(formset)
+                        changed_data.append(formset)
         else:
             for formset in self.formsets.values():
                 if formset is not None:
@@ -175,9 +177,38 @@ class ComplexModelForm(forms.ModelForm):
         if hasattr(self, "formsets_loaded") and callable(self.formsets_loaded):
             self.formsets_loaded()
 
+    def _get_errors(self):
+        # full_clean is forced because _errors is sometimes partialy filled.
+        self.full_clean()
+        return super(ComplexModelForm, self)._get_errors()
+    errors = property(_get_errors)
+
+    def _clean_fields(self):
+        super(ComplexModelForm, self)._clean_fields()
+        for formset_name, formset in getattr(self, 'formsets', {}).items():
+            if not formset.is_valid():
+                for form in formset.forms:
+                    if not form.is_valid():
+                        for name, field in form.fields.items():
+                            # value_from_datadict() gets the data from the data dictionaries.
+                            # Each widget type knows how to retrieve its own data, because some
+                            # widgets split data over several HTML fields.
+                            value = field.widget.value_from_datadict(form.data, form.files, form.add_prefix(name))
+                            try:
+                                if isinstance(field, FileField):
+                                    initial = form.initial.get(name, field.initial)
+                                    value = field.clean(value, initial)
+                                else:
+                                    value = field.clean(value)
+                                if hasattr(form, 'clean_%s' % name) and hasattr(form, 'cleaned_data'):
+                                    value = getattr(form, 'clean_%s' % name)()
+                            except ValidationError, e:
+                                self._errors["%s | %s" % (formset_name, name)] = self.error_class(e.messages)
+
+
     def clean(self):
         cleaned_data = super(ComplexModelForm, self).clean()
-        for formset_name, formset in getattr(self, 'formsets', {}).items():
+        for formset in getattr(self, 'formsets', {}).values():
             if formset:
                 formset.clean()
         return cleaned_data
@@ -189,7 +220,7 @@ class ComplexModelForm(forms.ModelForm):
             return name
 
     def get_related_field(self, name):
-        return self._meta.model.__dict__[name].related
+        return self._meta.model._meta.get_field_by_name(name)[0]
 
     def get_related_model(self, name):
         field = self.get_related_field(name)
@@ -212,28 +243,32 @@ class ComplexModelForm(forms.ModelForm):
                     data_sorted = sorted(data.keys())
                     first_form_key = data_sorted[0]
                     last_form_key = data_sorted[-1]
-                    r = start.match(first_form_key)
-                    r_dict = r.groupdict()
+                    regex = start.match(first_form_key)
+                    regex_dict = regex.groupdict()
 
-                    form_idx = int(r_dict['form_idx'])
+                    form_idx = int(regex_dict['form_idx'])
                     if form_idx > 0:
                         previous_form_key = "%s-%d-%s" % (
                             prefix,
                             form_idx - 1,
-                            r_dict['suffix'],
+                            regex_dict['suffix'],
                         )
                         if not data.has_key(previous_form_key):
                             data.setlist(previous_form_key, data.getlist(last_form_key))
 
             for key in sorted(data.keys()):
-                r = start.match(key)
-                if r is None: continue
+                regex = start.match(key)
 
-                r_dict = r.groupdict()
-                form_idx = int(r_dict['form_idx'])
+                if regex is None:
+                    continue
+
+                regex_dict = regex.groupdict()
+                form_idx = int(regex_dict['form_idx'])
+
                 if form_idx < idx:
                     continue
-                suffix = r_dict['suffix']
+
+                suffix = regex_dict['suffix']
 
                 next_form_key = "%s-%d-%s" % (
                     prefix,
@@ -246,7 +281,13 @@ class ComplexModelForm(forms.ModelForm):
                     del data[key]
 
 
-        def resolve_callable(var, args=[], kwargs={}, default=None):
+        def resolve_callable(var, args=None, kwargs=None, default=None):
+            if args is None:
+                args = []
+
+            if kwargs is None:
+                kwargs = {}
+
             if callable(var):
                 return var(*args, **kwargs) or default
             else:
@@ -290,7 +331,7 @@ class ComplexModelForm(forms.ModelForm):
         if data:
             # Asking to delete last form
             if isinstance(data, QueryDict):
-                nb_forms = map(int, data.getlist("%s-%s" % (prefix, TOTAL_FORM_COUNT)))
+                nb_forms = [int(total_form_count) for total_form_count in data.getlist("%s-%s" % (prefix, TOTAL_FORM_COUNT))]
             else:
                 nb_forms = [ int(data["%s-%s" % (prefix, TOTAL_FORM_COUNT)]) ]
 
@@ -325,7 +366,7 @@ class ComplexModelForm(forms.ModelForm):
 
             if to:
                 i = 0
-                for j in range(int(data.get("%s-%s" % (prefix, TOTAL_FORM_COUNT), 0))):
+                for _ in range(int(data.get("%s-%s" % (prefix, TOTAL_FORM_COUNT), 0))):
                     pk_key = "%s-%d-%s" % (prefix, i, instance_pk)
 
                     if i >= int(data["%s-%s" % (prefix, INITIAL_FORM_COUNT)]):
@@ -371,13 +412,11 @@ class ComplexModelForm(forms.ModelForm):
                             objects = to.objects.filter(pk = data.get("%s%s" % (base_key, instance_pk)) or 0)
                             if objects.exists():
                                 objects_deleted = True
-                                for o in objects:
-                                    o.delete()
+                                for obj in objects:
+                                    obj.delete()
 
                         shift_keys(data, prefix, i)
-                        # TODO : Corriger un bug ici, le shift_keys ne remonte pas les fichiers au formulaires précédents!
                         shift_keys(files, prefix, i, True)
-                        #print "special print : ", data, files
                         data["%s-%s" % (prefix, TOTAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, TOTAL_FORM_COUNT)]) - 1
                         if objects_deleted:
                             data["%s-%s" % (prefix, INITIAL_FORM_COUNT)] = int(data["%s-%s" % (prefix, INITIAL_FORM_COUNT)]) - 1
@@ -505,7 +544,7 @@ class ComplexModelForm(forms.ModelForm):
 
     def is_valid(self):
         if hasattr(self, "formsets") and isinstance(self.formsets, dict):
-            for formset_name, formset in self.formsets.items():
+            for formset in self.formsets.values():
                 if len(formset.forms) > 0 and len(self.data) and (
                     not (formset.is_valid() and all([ f.is_valid() for f in formset.forms ])) or \
                     len(self.data.getlist(formset.add_prefix(TOTAL_FORM_COUNT))) > 1
@@ -528,26 +567,27 @@ class ComplexModelForm(forms.ModelForm):
                     formset_name
                 ).add(*objects)
 
+            #self.formsets = {}
+            #self.data = {}
+            #self.files = {}
+            #self.is_bound = False
 
+            #for formset_name, formset_values in self.base_formsets.items():
+            #    new_formset_values = dict(formset_values)
+            #    new_formset_values.update(
+            #        {
+            #            'initial': None,
+            #            #'queryset': getattr(instance, formset_name).filter(
+            #            #    pk__in = [ i.pk for i in instances ]
+            #            #),
+            #            #'queryset': None,
+            #            'extra': 0,
+            #        }
+            #    )
 
-            self.formsets = {}
-            self.data = {}
-            self.files = {}
-            self.is_bound = False
+            #    self.formsets[formset_name] = self._get_formset(formset_name, **formset_values)
 
-            for formset_name, formset_values in self.base_formsets.items():
-                new_formset_values = dict(formset_values)
-                new_formset_values.update(
-                    {
-                        'initial': None,
-                        'extra': 0,
-                    }
-                )
-
-                self.formsets[formset_name] = self._get_formset(formset_name, **formset_values)
-
-            if hasattr(self, "formsets_loaded") and callable(self.formsets_loaded):
-                self.formsets_loaded()
+            #if hasattr(self, "formsets_loaded") and callable(self.formsets_loaded):
+            #    self.formsets_loaded()
 
         return instance
-
