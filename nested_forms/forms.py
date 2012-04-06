@@ -428,14 +428,10 @@ class ComplexModelForm(forms.ModelForm):
         elif not self.instance.pk:
             initial = resolve_callable(initial, args=[instance], default=[])
 
-        #print "Mes fichiers : ", files
-        #print data, data and data.urlencode()or ""
         formset = None
 
         #print prefix, "%s-%s" % (prefix, TOTAL_FORM_COUNT), data and data.get("%s-%s" % (prefix, TOTAL_FORM_COUNT), "NOT SET")
         #print prefix, "%s-%s" % (prefix, INITIAL_FORM_COUNT), data and data.get("%s-%s" % (prefix, INITIAL_FORM_COUNT), "NOT SET")
-
-        #print type(instance), instance, instance.pk
 
         if instance.pk:
             if isinstance(field, RelatedObject):
@@ -566,28 +562,5 @@ class ComplexModelForm(forms.ModelForm):
                     instance,
                     formset_name
                 ).add(*objects)
-
-            #self.formsets = {}
-            #self.data = {}
-            #self.files = {}
-            #self.is_bound = False
-
-            #for formset_name, formset_values in self.base_formsets.items():
-            #    new_formset_values = dict(formset_values)
-            #    new_formset_values.update(
-            #        {
-            #            'initial': None,
-            #            #'queryset': getattr(instance, formset_name).filter(
-            #            #    pk__in = [ i.pk for i in instances ]
-            #            #),
-            #            #'queryset': None,
-            #            'extra': 0,
-            #        }
-            #    )
-
-            #    self.formsets[formset_name] = self._get_formset(formset_name, **formset_values)
-
-            #if hasattr(self, "formsets_loaded") and callable(self.formsets_loaded):
-            #    self.formsets_loaded()
 
         return instance
