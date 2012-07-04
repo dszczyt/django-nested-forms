@@ -12,6 +12,7 @@ from django.forms.formsets import TOTAL_FORM_COUNT, INITIAL_FORM_COUNT, DELETION
 from django.forms.models import ModelFormOptions, ModelFormMetaclass, modelformset_factory, \
         inlineformset_factory, BaseInlineFormSet
 from django.http import QueryDict
+from django.contrib.contenttypes.generic import GenericRelation
 
 logger = logging.getLogger(__name__)
 
@@ -224,10 +225,13 @@ class ComplexModelForm(forms.ModelForm):
 
     def get_related_model(self, name):
         field = self.get_related_field(name)
-        if isinstance(field, RelatedObject):
+        if isinstance(field, GenericRelation):
+            return field.related.parent_model
+        elif isinstance(field, RelatedObject):
             return field.model
         elif isinstance(field, models.ManyToManyField):
             return field.rel.to
+        raise
 
     def _get_formset(self, name, form, extra=None, initial=None, can_delete=True, \
                      update_button=None, fk_name=None, duplicate=False, \
@@ -462,7 +466,7 @@ class ComplexModelForm(forms.ModelForm):
                         queryset = to.objects.filter(
                                 pk__in = list(to.objects.filter(
                                     **{
-                                        field.rel.related_name: self.instance.pk
+                                        field.related.var_name: self.instance.pk
                                     }
                                 ).values_list("pk", flat=True)) + [
                                     _data.get('%s-%d-%s' % (prefix, x, instance_pk))
