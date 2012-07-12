@@ -466,7 +466,7 @@ class ComplexModelForm(forms.ModelForm):
                         queryset = to.objects.filter(
                                 pk__in = list(to.objects.filter(
                                     **{
-                                        field.related.var_name: self.instance.pk
+                                        field.rel.related_name or field.related.var_name: self.instance.pk
                                     }
                                 ).values_list("pk", flat=True)) + [
                                     _data.get('%s-%d-%s' % (prefix, x, instance_pk))
@@ -562,9 +562,9 @@ class ComplexModelForm(forms.ModelForm):
                 formset = self.formsets[formset_name]
                 objects = formset.save()
 
-                getattr(
-                    instance,
-                    formset_name
-                ).add(*objects)
+                #getattr(
+                #    instance,
+                #    formset_name
+                #).add(*objects)
 
         return instance
