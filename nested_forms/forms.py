@@ -333,6 +333,8 @@ class ComplexModelForm(forms.ModelForm):
                         continue
 
                     pk = data.get(pk_key, 0)
+                    pk = str(pk).isdigit() and int(pk) or 0
+
                     try:
                         to.objects.get(pk = pk)
                     except to.DoesNotExist:
