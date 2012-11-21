@@ -475,7 +475,7 @@ class ComplexModelForm(forms.ModelForm):
                                     for x in range(int(_data.get("%s-%s" % (prefix, INITIAL_FORM_COUNT), 0)))
                                 ]
                         ).distinct()
-                if allowed_objects:
+                if isinstance(allowed_objects, QuerySet):
                     queryset = allowed_objects.filter(
                         pk__in = queryset.values_list('pk', flat=True)
                     ).distinct()
