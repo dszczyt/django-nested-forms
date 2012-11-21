@@ -564,9 +564,12 @@ class ComplexModelForm(forms.ModelForm):
                 formset = self.formsets[formset_name]
                 objects = formset.save()
 
-                #getattr(
-                #    instance,
-                #    formset_name
-                #).add(*objects)
+                try:
+                    getattr(
+                        instance,
+                        formset_name
+                    ).add(*objects)
+                except:
+                    pass
 
         return instance
